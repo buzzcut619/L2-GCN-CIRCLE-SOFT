@@ -1,1 +1,50 @@
+class GraphConvolution(nn.Module):
 
+    def __init__(self, in_features, out_features, bias=False):
+        super(GraphConvolution, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(in_features, out_features))
+        self.fc1 = nn.Linear(out_features, out_features, bias=bias)  # Use nn.Linear for fc1
+        self.fc2 = nn.Linear(out_features, out_features, bias=bias)
+        self.bias = Parameter(torch.Tensor(1, 1, out_features)) if bias else None
+        self.reset_parameters()
+
+
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        self.weight.data.uniform_(-stdv, stdv)
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+    def forward(self, input, adj):
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        input = input.to(device)
+        adj = adj.to(device)
+        self.weight = self.weight.to(device)
+        # Graph convolution operation
+        support = torch.matmul(input, self.weight) ##N*outfeatures
+        diag =torch.diag(torch.diagonal(adj))
+        diag = 1 - diag
+        adj_no_diag = torch.matmul(adj,diag)
+        neighbor_features = torch.matmul(adj_no_diag,support)  
+        adj_binary = torch.where(adj > 0, torch.ones_like(adj), adj)
+        num_neighbors = adj_binary.sum(dim=1, keepdim=True)
+        neighbor_featuresmean = neighbor_features/ num_neighbors
+        diag2 = torch.diag(torch.diagonal(adj))
+        adj_only_diag = torch.matmul(adj,diag2)
+        self_feature=torch.matmul(adj_only_diag,support)
+
+        output_fc2 = F.relu(self.fc2(neighbor_featuresmean))
+        output_fc1 = F.relu(self.fc2(self_feature))
+        #output = torch.cat((output_fc1, output_fc2), dim=1)
+        output=(output_fc2 + output_fc1)
+        if self.bias is not None:
+            output += self.bias
+
+        return output
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+               + str(self.in_features) + ' -> ' \
+               + str(self.out_features) + ')'
